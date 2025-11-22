@@ -11,6 +11,9 @@ const INGAME_API_KEY = process.env.INGAME_API_KEY || 'change-this-secret';
 const BOT_TOKEN = process.env.DISCORD_TOKEN;
 const PORT = process.env.PORT || 3000;
 
+// Roblox gamepasses base URL (official source)
+const ROBLOX_GAMEPASSES_BASE = 'https://apis.roblox.com/game-passes/v1';
+
 // ---- SIMPLE DATA STORAGE (in memory) ----
 const players = new Map(); // key: userId, value: { userId, username, raised, donated }
 
@@ -98,7 +101,7 @@ app.get('/api/top-donated', (req, res) => {
   res.json(list);
 });
 
-// ---- 3) NEW: PLACE -> UNIVERSE ID ENDPOINT ----
+// ---- 3) PLACE -> UNIVERSE ID ENDPOINT ----
 // Usage: GET /universe-id?placeId=123456789
 app.get('/universe-id', async (req, res) => {
   const placeId = req.query.placeId;
@@ -109,11 +112,11 @@ app.get('/universe-id', async (req, res) => {
 
   try {
     const url = `https://apis.roblox.com/universes/v1/places/${placeId}/universe`;
-    const response = await fetch(url); // Node 18+ has global fetch
+    const response = await fetch(url);
 
     if (!response.ok) {
       const text = await response.text();
-      console.error('Roblox API error:', response.status, text);
+      console.error('Roblox API error (universe):', response.status, text);
       return res.status(response.status).json({
         error: 'Roblox API error',
         status: response.status,
@@ -122,14 +125,57 @@ app.get('/universe-id', async (req, res) => {
     }
 
     const data = await response.json();
-    // data should look like: { "universeId": 123456789 }
     return res.json({
       placeId: String(placeId),
       universeId: data.universeId,
       raw: data,
     });
   } catch (err) {
-    console.error('Error talking to Roblox API:', err);
+    console.error('Error talking to Roblox universe API:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ---- 4) NEW: GAMEPASSES BY UNIVERSE ID ----
+// Usage: GET /universe-game-passes?universeId=4130052554&passView=Full&pageSize=100
+app.get('/universe-game-passes', async (req, res) => {
+  const universeId = req.query.universeId;
+
+  if (!universeId) {
+    return res.status(400).json({ error: 'universeId query parameter is required' });
+  }
+
+  const passView = req.query.passView || 'Full';
+  const pageSize = req.query.pageSize || '100';
+  const pageToken = req.query.pageToken || '';
+
+  const params = new URLSearchParams();
+  params.set('passView', passView);
+  params.set('pageSize', pageSize);
+  if (pageToken) {
+    params.set('pageToken', pageToken);
+  }
+
+  const url = `${ROBLOX_GAMEPASSES_BASE}/universes/${universeId}/game-passes?${params.toString()}`;
+
+  try {
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      const text = await response.text();
+      console.error('Roblox API error (gamepasses):', response.status, text);
+      return res.status(response.status).json({
+        error: 'Roblox API error',
+        status: response.status,
+        body: text,
+      });
+    }
+
+    const data = await response.json();
+    // Roblox already returns { gamePasses: [...], nextPageToken: "..." }
+    return res.json(data);
+  } catch (err) {
+    console.error('Error talking to Roblox gamepasses API:', err);
     return res.status(500).json({ error: 'Server error' });
   }
 });
